@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yieldops"
+version = "0.1.0"
+description = "Evidence-backed optimization and intelligence for AI inference infrastructure"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "Proprietary" }
+dependencies = [
+    "fastapi>=0.163,<0.164",
+    "uvicorn>=0.38,<0.39",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28,<0.29",
+    "httpx2>=2.16.0",
+    "pytest>=8.4,<9",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
