@@ -44,9 +44,13 @@ class SimulatedInferenceBackend:
             task_category=request.task_category,
             input_tokens=input_tokens,
             output_tokens=len(output_tokens),
+            token_count_provenance=MetricProvenance.SIMULATED,
             ttft_ms=ttft_ms,
             tpot_ms=tpot_ms,
             end_to_end_latency_ms=end_to_end_ms,
+            output_tokens_per_second=(
+                len(output_tokens) * 1_000 / end_to_end_ms if end_to_end_ms else None
+            ),
             success=True,
             provenance=MetricProvenance.SIMULATED,
         )

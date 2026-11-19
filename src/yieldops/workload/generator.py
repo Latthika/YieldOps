@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import math
+import random
 import time
+from collections import Counter
 from collections.abc import Iterable
 
 import httpx
@@ -27,19 +29,43 @@ def nearest_rank(values: Iterable[float], percentile: float) -> float | None:
     return ordered[max(1, math.ceil(len(ordered) * percentile)) - 1]
 
 
-async def run_workload(base_url: str, request_count: int, concurrency: int) -> dict[str, object]:
-    """Run synthetic requests and separate measured client from simulated server times."""
+async def run_workload(
+    base_url: str,
+    request_count: int,
+    concurrency: int,
+    *,
+    pattern: str = "mixed",
+    seed: int = 42,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, object]:
+    """Run controlled synthetic traffic and separate client from backend timing."""
     if request_count < 1 or concurrency < 1:
         raise ValueError("request_count and concurrency must both be positive")
+    if pattern not in {"mixed", "classification", "bursty"}:
+        raise ValueError("pattern must be mixed, classification, or bursty")
 
     semaphore = asyncio.Semaphore(concurrency)
+    rng = random.Random(seed)
     client_latencies: list[float] = []
-    errors = 0
+    server_latencies: list[float] = []
+    server_telemetry: list[dict[str, object]] = []
+    task_categories: Counter[str] = Counter()
+    status_counts: Counter[str] = Counter()
+    transport_errors = 0
+    started_run = time.perf_counter()
 
-    async with httpx.AsyncClient(base_url=base_url, timeout=30.0) as client:
+    async with httpx.AsyncClient(
+        base_url=base_url, timeout=30.0, transport=transport
+    ) as client:
         async def send_one(index: int) -> None:
-            nonlocal errors
-            category, prompt = PROMPTS[index % len(PROMPTS)]
+            nonlocal transport_errors
+            if pattern == "classification":
+                category, prompt = PROMPTS[1]
+            elif pattern == "mixed":
+                category, prompt = rng.choice(PROMPTS)
+            else:
+                category, prompt = PROMPTS[index % len(PROMPTS)]
+                await asyncio.sleep((index // concurrency) * 0.25)
             payload = {
                 "prompt": f"Synthetic request {index}: {prompt}",
                 "model_name": "yieldops-simulator",
@@ -51,20 +77,39 @@ async def run_workload(base_url: str, request_count: int, concurrency: int) -> d
                 try:
                     response = await client.post("/v1/inference", json=payload)
                     client_latencies.append((time.perf_counter() - started) * 1_000)
-                    if response.status_code != 200:
-                        errors += 1
+                    status_counts[str(response.status_code)] += 1
+                    if response.status_code == 200:
+                        telemetry = response.json().get("telemetry", {})
+                        if isinstance(telemetry, dict):
+                            server_telemetry.append(telemetry)
+                            task_categories[str(telemetry.get("task_category", "unknown"))] += 1
+                        latency = telemetry.get("end_to_end_latency_ms")
+                        latency = telemetry.get("end_to_end_latency_ms")
+                        if isinstance(latency, (int, float)):
+                            server_latencies.append(float(latency))
                 except httpx.HTTPError:
-                    errors += 1
+                    transport_errors += 1
 
         await asyncio.gather(*(send_one(index) for index in range(request_count)))
         summary_response = await client.get("/v1/telemetry/summary")
         summary_response.raise_for_status()
         summary = summary_response.json()
 
+    elapsed_seconds = time.perf_counter() - started_run
+    success_count = status_counts.get("200", 0)
+
     return {
         "requested": request_count,
-        "successful_http_requests": request_count - errors,
-        "errors": errors,
+        "pattern": pattern,
+        "seed": seed,
+        "concurrency_limit": concurrency,
+        "elapsed_seconds": elapsed_seconds,
+        "successful_http_requests": success_count,
+        "success_rate": success_count / request_count,
+        "task_category_counts": dict(sorted(task_categories.items())),
+        "http_status_counts": dict(sorted(status_counts.items())),
+        "transport_errors": transport_errors,
+        "requests_per_second": success_count / elapsed_seconds if elapsed_seconds else None,
         "client_http_latency_ms": {
             "provenance": "measured",
             "p50": nearest_rank(client_latencies, 0.50),
@@ -72,10 +117,13 @@ async def run_workload(base_url: str, request_count: int, concurrency: int) -> d
             "p99": nearest_rank(client_latencies, 0.99),
         },
         "server_inference_latency_ms": {
-            "provenance": summary["provenance"],
-            "request_count_in_process": summary["request_count"],
-            "p50": summary["p50_end_to_end_latency_ms"],
-            "p95": summary["p95_end_to_end_latency_ms"],
-            "p99": summary["p99_end_to_end_latency_ms"],
+            "provenance_counts": dict(
+                Counter(item.get("provenance", "unknown") for item in server_telemetry)
+            ),
+            "request_count_in_this_run": len(server_latencies),
+            "p50": nearest_rank(server_latencies, 0.50),
+            "p95": nearest_rank(server_latencies, 0.95),
+            "p99": nearest_rank(server_latencies, 0.99),
         },
+        "process_sample_summary": summary,
     }

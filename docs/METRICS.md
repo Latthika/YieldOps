@@ -1,14 +1,25 @@
-# Initial Metrics
+# Metrics and Provenance
 
-| Metric | Definition in this milestone | Provenance |
+| Metric | Source | Provenance / caveat |
 |---|---|---|
-| Input/output token count | Whitespace-separated pieces in the simulator | Simulated placeholder |
-| TTFT | `20 ms + 0.5 ms × input count` | Simulated |
-| TPOT | Fixed at 10 ms when output is non-empty | Simulated |
-| End-to-end latency | `TTFT + (output count − 1) × TPOT` | Simulated |
-| Client HTTP latency | Local `perf_counter` duration around each HTTP request | Measured client-side for that run |
-| P50/P95/P99 | Nearest-rank percentile over the current in-memory sample | Inherits the sample provenance |
+| Input/output token count | Simulator whitespace pieces, or actual server `usage` fields | `simulated` or `measured`; nullable when a real server omits usage. Whitespace counts are never labeled true tokenizer counts. |
+| TTFT | First non-empty streamed content from backend adapter | Simulated for the simulator; measured client-to-first-content wall time for OpenAI-compatible backend. Includes request dispatch/network/queue. |
+| TPOT | `(end-to-end - TTFT) / (completion_tokens - 1)` when output count > 1 | Measured only when server returns completion token count; simulator uses its deterministic formula. |
+| End-to-end latency | Backend formula or elapsed wall time around streaming request | `simulated` or `measured`; measured adapter time includes transport and queue overhead. |
+| Output tokens/second | Output-token count / end-to-end latency | Same provenance limitations as count and latency. |
+| Client HTTP latency | `perf_counter` around workload HTTP request | Measured client-side; separate from backend-reported metrics. TestClient benchmark is an in-process path and has no socket. |
+| Cost per request / token | Configurable input/output USD per 1,000 tokens | Always `estimated`; based only on user-supplied rate cards and known token usage. |
+| Prometheus request count | API process increments for successful and failed backend responses | Process-local; labels include controlled provenance and outcome values. |
+| Prometheus latency histogram | Backend timing values | Buckets are separated by provenance; not a measurement of GPU-only execution. |
 
-Percentiles sort the sample and select rank `ceil(p × n)`, using one-based ranks. Empty samples have no percentile. The workload runner's client timings include local HTTP/server overhead and must not be presented as model inference timings.
+## Percentiles
 
-No GPU utilization, GPU memory, temperature, power, KV-cache, or GPU throughput measurements exist yet. The simulator does not fabricate these values. No cost estimate is produced in this milestone.
+Percentiles use nearest rank: sort `n` values and select one-based rank `ceil(p*n)`. Empty samples have no percentile. Summaries apply to the retained in-memory sample, not all historical requests.
+
+## Prometheus endpoint
+
+`GET /metrics` emits Prometheus text exposition with request counters and a cumulative latency histogram (`_bucket`, `_sum`, `_count`). It uses only the standard library and supports local scraping; no Prometheus server, alert rules, Grafana dashboards, or multi-process aggregation are configured. Validate the endpoint against a deployed Prometheus server before treating it as production observability.
+
+## Never infer
+
+No GPU utilization, VRAM, power, temperature, KV-cache, cloud bill, or infrastructure allocation is collected. The simulator's fixed latency formulas are not elapsed inference times. Estimated token charges are not invoices or cost savings.

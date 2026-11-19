@@ -1,24 +1,19 @@
-# Technology Stack Audit
+# Technology Stack
 
-| Technology | Purpose / actual use | Location | Status and notes |
-|---|---|---|---|
-| Python 3.12 | Runtime target | `.python-version`, `pyproject.toml` | Implemented; app uses standard library plus dependencies. |
-| FastAPI | HTTP API and request validation integration | `src/yieldops/api/main.py` | Implemented. |
-| Pydantic 2 | Request/response/telemetry contracts | `src/yieldops/common/schemas.py` | Used directly but currently only transitive through FastAPI; should eventually be a direct declared dependency. |
-| Uvicorn | Local ASGI server | `pyproject.toml`; run command in `README.md` | Implemented for local development; no production deployment configuration. |
-| uv | Python environment, dependency resolution, lockfile | `uv.lock`, `pyproject.toml` | Used in development; lockfile present. |
-| HTTPX | Async local HTTP workload client | `src/yieldops/workload/generator.py` | Dev dependency. |
-| HTTPX2 | Compatibility with current Starlette TestClient path | `pyproject.toml`, `uv.lock` | Dev/test dependency; no application API calls. |
-| pytest | Unit and API behavior tests | `tests/` | 10 tests currently pass. |
-| Python standard library (`asyncio`, `time`, `threading`, `math`, `datetime`, `uuid`) | Workload concurrency/timing, bounded-store locking/statistics, identifiers | `src/yieldops/` | Used directly; no extra dependency. |
-| GitHub | Remote repository/commit hosting | `Latthika/YieldOps` | Development workflow only; not a runtime integration. |
-| PostgreSQL | Intended durable storage | `.env.example` has a sample URL only | Not installed/configured/used. No driver or storage code. |
-| LangGraph | Intended agent coordination | None | Not installed or used. |
-| vLLM / Transformers / PyTorch / MLX | Intended or optional inference paths | None in application dependencies | Not used; no model inference. |
-| Prometheus / Grafana / OpenTelemetry / DCGM | Intended observability | Empty `monitoring/` and `dashboards/` placeholders | Not configured; no exporter/dashboard. |
-| OpenTelemetry API | Present transitively in the resolved FastAPI dependency graph | `uv.lock` | No app instrumentation, SDK setup, spans, or exporter uses it. |
-| scikit-learn / XGBoost / LightGBM | Possible future forecasting | None | Not installed or used. |
-| Optuna / OR-Tools | Possible future optimization | None | Not installed or used. |
-| Docker / Docker Compose / Kubernetes | Future deployment | Empty placeholders only | Not configured. |
+| Technology | Purpose | Status |
+|---|---|---|
+| Python 3.12 | Application and experiments | Active; `.python-version` pins 3.12 and the workspace environment reports 3.12.16. |
+| FastAPI / Uvicorn | HTTP API and local ASGI server | Active. |
+| Pydantic 2 | Validated requests, telemetry, rate cards, and response schemas | Direct runtime dependency. |
+| HTTPX | Runtime OpenAI-compatible adapter; async synthetic workload client | Runtime dependency; test/mock transport is used in tests. |
+| pytest / HTTPX2 | Unit and TestClient/in-process integration tests | Development dependencies. |
+| Python standard library | Async dispatch, threading, timing, percentiles, median/MAD, synthetic data, forecasting, JSON/CSV | Used directly. |
+| Prometheus text exposition | `/metrics` counters and histogram | Implemented with a small standard-library exporter; no Prometheus service deployed. |
+| MLX / MLX-LM / vLLM-Metal | Possible Apple Silicon real-model runtime | Researched but not installed; waiting for approval to add large packages and download model files. |
+| NVIDIA CUDA / vLLM | NVIDIA GPU inference | Not available on this Apple Silicon host; remote GPU host not provisioned. |
+| PostgreSQL | Durable telemetry | Evaluated and deferred for this single-process milestone. |
+| Grafana / OpenTelemetry | Dashboard and distributed tracing | Not configured. |
+| LangGraph / agents | Future orchestration milestone | Not installed or implemented. |
+| Docker / Kubernetes | Deployment | Docker unavailable on host; no deployment manifests. |
 
-The locked dependency tree currently resolves FastAPI 0.163.1, Pydantic 2.14.3, Starlette 1.10.0, Uvicorn 0.38.0, HTTPX 0.28.1, HTTPX2 2.16.0, and pytest 8.4.2. See `uv.lock` for the complete transitive lock.
+`pyproject.toml` lists FastAPI, HTTPX, Pydantic, and Uvicorn as runtime dependencies. `uv.lock` pins the resolved tree; pytest and HTTPX2 are development dependencies. No ML, Prometheus, database, or GPU package was added.

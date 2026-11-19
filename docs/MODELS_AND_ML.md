@@ -1,32 +1,23 @@
-# Models and Machine Learning: Current State
+# Models and Machine Learning
 
-## Model inventory
+## Implemented and selected
 
-| Role | Actual implementation | Status |
-|---|---|---|
-| LLM for agent reasoning | None | No agents or LLM client exist. |
-| Inference model monitored by YieldOps | None | The API accepts a `model_name` label but does not load or call a model. |
-| Forecasting/anomaly/optimization ML | None | No trained, pretrained, or classical ML estimator is present. |
-| Test simulator | `SimulatedInferenceBackend` | Deterministic Python rules, not a learned model. |
+There is still no model downloaded, loaded, fine-tuned, or served. `SimulatedInferenceBackend` is deterministic Python logic and not an ML model. `model_name` in simulation is a label only.
 
-## Simulator details
+A backend boundary and an optional OpenAI-compatible streaming adapter are implemented. Adapter unit tests use `httpx.MockTransport`; they prove payload parsing and telemetry behavior, not model quality or execution. Model name, max output tokens, temperature, and top-p are passed to a compatible serving endpoint. Actual server token counts are used only when returned; there is no whitespace fallback for real inference.
 
-`src/yieldops/inference/simulator.py` counts input tokens using Python whitespace splitting, returns the fixed string `simulated completion`, and computes:
+## Hardware fit and inference research (2026-11-17)
 
-- `TTFT = 20 ms + 0.5 ms × whitespace-piece count`
-- `TPOT = 10 ms` when output is non-empty
-- `end_to_end = TTFT + (output_count - 1) × TPOT`
+The inspected host is an Apple M4 MacBook Air with 16 GB unified memory, macOS 15.6.1, and native ARM64 Python 3.12.16. `nvidia-smi` and Docker are unavailable; therefore NVIDIA/CUDA benchmarking is not possible here.
 
-The simulator has no architecture, weights, tokenizer, training data, loss function, optimizer, or model-quality metric. Its generated output is not a language-model response. The `model_name` request field is metadata only.
+The official [MLX installation guide](https://github.com/ml-explore/mlx/blob/main/docs/src/install.rst) states that Apple Silicon, native Python 3.10+, and macOS 14+ are supported, which matches this host. The official [MLX-LM project](https://github.com/ml-explore/mlx-lm) provides model generation on Apple Silicon and notes that large models relative to RAM can be slow. Official [vLLM installation guidance](https://docs.vllm.ai/en/latest/getting_started/installation/cpu/) describes macOS Apple Silicon CPU support as experimental and source-build based; the separate [vLLM-Metal documentation](https://docs.vllm.ai/projects/vllm-metal/en/latest/) describes its MLX-backed Apple GPU plugin.
 
-## Training and inference
+So real small-model inference is technically plausible on this Mac through MLX/MLX-LM or vLLM-Metal, as a separate Apple Metal experiment. It is not evidence of NVIDIA/CUDA performance. No large inference packages or model files were installed or downloaded because explicit approval is required. The OpenAI-compatible adapter is the integration boundary pending an approved serving runtime and model.
 
-YieldOps does **not** train an LLM. It does not currently use an existing LLM through an API or local runtime either. No PyTorch, Transformers, vLLM, MLX, or model SDK is imported by the application. PyTorch availability on the development host is unrelated to the runtime implementation.
+## Forecast and anomaly methods
 
-## Evaluation evidence
+The project now has two deterministic forecast baselines: last value and 24-hour seasonal naive. A time-aware holdout evaluates these on generated data. The anomaly baseline uses a rolling prior-window median/MAD rule. Neither is trained ML; no real workload series has been collected. Current results should be described as synthetic baseline exercises only.
 
-The test suite verifies deterministic formulas and API behavior. It has no accuracy, F1, schema-quality, reference-generation, or LLM-as-judge evaluation. No model output quality has been measured. No efficiency improvement is established.
+## Not implemented
 
-## Candidate models (future options, not selections)
-
-Once hardware, license, task, and quality targets are established, candidates could include a small open-weight instruction model served by a compatible engine on an approved GPU host. Apple Silicon MLX/vLLM-Metal could be explored as a distinct local path. Forecasting should begin with statistical baselines before comparing scikit-learn or other regressors. None of these options has been installed, benchmarked, or selected in this repository.
+No agents or orchestration, actual forecast training, model quality evaluation, LLM evaluation set, tokenizer library, GPU telemetry, optimization, or evidence-backed savings claim exists.

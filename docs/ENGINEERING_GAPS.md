@@ -1,34 +1,27 @@
 # Engineering Gaps and Production Readiness
 
-## Highest-priority gaps
+## What this milestone added
 
-1. **No real inference backend:** current output and latency are deterministic simulation. No NVIDIA/CUDA benchmark is possible from this implementation.
-2. **No durable storage:** telemetry is process-local, capped at 10,000 records, lost on restart, and not shared across workers.
-3. **No actual observability stack:** no Prometheus scrape endpoint/exporter, Grafana dashboard, OpenTelemetry traces, or GPU/DCGM metrics.
-4. **No cost attribution:** no pricing source, allocation policy, measurement period, provider bill integration, or cost calculation.
-5. **No optimization/evaluation:** no model quality evaluation, baseline comparison, optimizer, or evidence-backed recommendations.
-6. **No agents:** LangGraph and approval workflow are not implemented; policy text in README is not an enforcement mechanism.
-7. **No deployment/CI:** no Dockerfile, Compose config, Kubernetes manifests, GitHub Actions workflow, or deployment/runbook validation.
+- Backend protocol plus deterministic simulator and optional OpenAI-compatible streaming adapter. Adapter tests use a mock endpoint; real model execution remains unverified.
+- Provenance-separated timing and token-count fields, optional true server usage counts, failure telemetry, model/workload labels, and output throughput when derivable.
+- A local Prometheus text endpoint, prompt-free profiles, configurable estimated token pricing, rolling MAD anomaly detection, and synthetic forecast baselines.
+- Controlled workload patterns and separate client/backend timing. TestClient and MockTransport cover local code paths.
 
-## Code-level concerns
+## Remaining gaps
 
-- `health_check` is static and does not check dependencies or readiness.
-- `run_inference` is declared async but directly calls a synchronous backend. That is trivial today; a blocking model call would block the event loop unless moved to an appropriate worker/thread/async adapter.
-- Simulator values are constructor defaults in code, not validated configuration. Negative values could fail Pydantic metric validation at runtime.
-- Token fields are named tokens but are whitespace counts, not model tokenizer counts.
-- `TelemetrySummary.provenance` is hard-coded simulated and the store is not designed to correctly summarize mixed provenance. This is acceptable only for the single simulator path.
-- Failed HTTP/API requests are not recorded as request telemetry. The workload runner counts errors in its own output only.
-- The in-memory summary is a bounded recent sample; `request_count` is not an all-time count. The API does not expose the retained window size or uptime.
-- `model_name` and `tenant_id` are caller-provided labels without a model registry or tenant authorization.
-- `pydantic` is imported directly but not declared as a direct dependency in `pyproject.toml` (it currently arrives through FastAPI).
-- TestClient integration tests run in-process. There are no tests for concurrency, process restart, persistence, performance/evaluation, or live model behavior.
-- No coverage percentage, linter, type checker, or security scanner is configured.
-- `.env.example` documents environment names, but the application does not load or use these variables.
+1. **Real model run:** no runtime or model weights installed; no genuine token throughput or quality evidence. MLX/MLX-LM or vLLM-Metal is a plausible Apple Silicon path, but needs user approval for packages and model download.
+2. **GPU hardware metrics:** no NVIDIA/CUDA device on this Mac. Apple Metal utilization has not been instrumented. Never publish fake GPU metrics.
+3. **Remote benchmark:** no remote GPU server. Uvicorn loopback binding was denied in this sandbox, so the current benchmark is TestClient in-process rather than socket-based.
+4. **Persistent telemetry:** memory-only, capped at 10,000 records, reset on restart, and not shared by worker processes. PostgreSQL is deferred pending a demonstrated need.
+5. **Observability:** `/metrics` is tested in API tests, but no Prometheus scrape server, Grafana dashboard, alerting, or OpenTelemetry traces have been verified.
+6. **Cost:** caller-supplied token rates only. No provider invoice, tenant billing source, actual GPU allocation, idle-cost method, or savings calculation exists.
+7. **Forecast and anomaly validity:** only generated data and injected labels; no production baseline, confidence intervals, seasonal drift study, or user workload validation.
+8. **Workload API:** synthetic HTTP patterns are mock-tested; live socket concurrency under Uvicorn could not be exercised in the sandbox. The in-process benchmark is not production capacity evidence.
+9. **Operations/security:** no auth, rate limiting, quotas, TLS termination, secrets manager, deployment image, CI, rollout, or production runbook. The configured model endpoint should remain local/trusted until security controls exist.
+10. **Agents/optimization:** not implemented by design; these belong to later plan milestones.
 
-## Security and operational gaps
+## Cautions
 
-The app has no authentication, rate limiting, request quotas, TLS termination, structured logging policy, secrets management, tenant isolation, or production error policy. It does not persist prompt text, but requests necessarily pass through process memory. The current dev service should not be exposed publicly or used for live workloads.
+The model-server adapter forwards prompt content to the configured backend because that is required for inference. Telemetry retains neither prompt nor generated content; error responses are generic and error records retain only exception class. This is a data-minimization property, not an authentication or privacy guarantee.
 
-## Do not claim yet
-
-Do not call the current service an LLM platform, agentic system, GPU monitor, cost optimizer, forecaster, benchmark suite, or production-ready deployment. Accurate description: a tested FastAPI simulator and telemetry contract prototype with a synthetic HTTP smoke runner.
+Do not claim a real model is served, GPU optimized, lower cost, production-ready, or agentic. Safe description: a tested FastAPI inference-monitoring prototype with an optional compatible-backend adapter, deterministic simulation, prompt-free telemetry, and synthetic workload intelligence baselines.

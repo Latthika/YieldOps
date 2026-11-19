@@ -1,5 +1,9 @@
 # Agent Design: Current State and Requirements
 
+## Milestones 2 and 3 scope
+
+No agents or orchestration were added during inference/telemetry or workload-intelligence work. Profiles, cost formulas, anomaly rules, and forecast baselines remain ordinary testable Python functions. Agent implementation stays reserved for Days 56–70, where state, tools, retries, evaluation, and human approval can be designed and verified together.
+
 ## Current state
 
 - LangGraph is not a dependency in `pyproject.toml` or `uv.lock`.

@@ -18,6 +18,7 @@ def _record(latency_ms: float, input_tokens: int = 2) -> InferenceTelemetry:
         task_category=TaskCategory.OTHER,
         input_tokens=input_tokens,
         output_tokens=2,
+        token_count_provenance=MetricProvenance.SIMULATED,
         ttft_ms=latency_ms - 10,
         tpot_ms=10,
         end_to_end_latency_ms=latency_ms,
@@ -34,7 +35,12 @@ def test_summary_uses_nearest_rank_percentiles_and_token_totals() -> None:
     result = store.summary()
 
     assert result.request_count == 3
+    assert result.successful_request_count == 3
+    assert result.failed_request_count == 0
     assert result.simulated_request_count == 3
+    assert result.measured_request_count == 0
+    assert result.estimated_request_count == 0
+    assert result.requests_without_token_counts == 0
     assert result.total_input_tokens == 6
     assert result.total_output_tokens == 6
     assert result.p50_end_to_end_latency_ms == 32.0

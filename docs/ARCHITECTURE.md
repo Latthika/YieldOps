@@ -1,67 +1,62 @@
-# YieldOps Architecture: Current and Intended
+# YieldOps Architecture
 
-## Current implementation
-
-The implemented system is a small HTTP API with a deterministic simulator. It validates an inference-shaped request, synthesizes a response and timing fields, stores prompt-free telemetry in process memory, and returns a summary. No model server, database, metrics server, agent, or optimizer is connected.
+## Implemented components
 
 ```mermaid
 flowchart LR
-    WG["Synthetic workload runner<br/>scripts/run_synthetic_workload.py"] -->|HTTP POST /v1/inference| API["FastAPI<br/>src/yieldops/api/main.py"]
-    API -->|Pydantic validation| SCHEMA["Schemas<br/>src/yieldops/common/schemas.py"]
-    API -->|infer(request)| SIM["SimulatedInferenceBackend<br/>src/yieldops/inference/simulator.py"]
-    SIM -->|response + synthetic telemetry| API
-    API -->|metadata only| STORE["InMemoryTelemetryStore\nsrc/yieldops/telemetry/store.py"]
-    WG -->|HTTP GET /v1/telemetry/summary| API
-    API -->|nearest-rank P50/P95/P99| STORE
-    STORE -->|summary JSON| API
+    W[Workload CLI] -->|HTTP JSON| API[FastAPI]
+    API --> CONTRACT[Pydantic contracts]
+    API -->|asyncio.to_thread| PORT[InferenceBackend protocol]
+    PORT --> SIM[Deterministic simulator]
+    PORT -. optional endpoint .-> OA[OpenAI-compatible streaming server]
+    SIM --> TEL[Prompt-free request telemetry]
+    OA --> TEL
+    TEL --> STORE[Bounded in-memory store]
+    TEL --> METRICS[Prometheus text exporter]
+    STORE --> SUMMARY[Summary / profile / anomaly / cost routes]
+    STORE -. synthetic experiment .-> FORECAST[Forecast baselines]
 ```
 
-`GET /health` returns a static success response. `POST /v1/inference` validates with `InferenceRequest`, invokes `SimulatedInferenceBackend.infer`, appends its `InferenceTelemetry`, and returns an `InferenceResponse`. `GET /v1/telemetry/summary` summarizes the most recent retained records. The app stores a module-level backend and store; both are in-process objects.
+The OpenAI-compatible adapter is implemented and tested against a mock HTTP server. It has **not** been run against model weights. The simulator remains the default. Prometheus output is a small standard-library text exporter; no Prometheus server or Grafana dashboard is deployed.
 
-The test suite calls the app in-process with FastAPI `TestClient`. The separate 20-request smoke run used an HTTP server and the script in `scripts/run_synthetic_workload.py`; it was a local simulator check, not a model benchmark.
+### Request path
 
-## Planned architecture (not implemented)
+1. `InferenceRequest` validates prompt length, model label, task category, token limit, temperature, and top-p.
+2. FastAPI runs the synchronous backend through `asyncio.to_thread`, so a blocking model-server call does not block the event loop.
+3. The simulator emits deterministic output and simulated timings/counts. The optional streaming backend posts to an OpenAI-compatible `/chat/completions` endpoint, measures first content and end-to-end wall time, and reads tokenizer usage only when the server returns it.
+4. The API retains metadata only. Prompt and completion content are not part of telemetry or exception records.
+5. In-memory summary, profile, anomaly, and cost functions operate on the most recent bounded telemetry sample. `/metrics` exposes per-process request counters and latency histogram buckets.
 
-```mermaid
-flowchart LR
-    W[Workload profiles] --> API[API / gateway]
-    API --> R[Inference adapter]
-    R -. planned .-> V[vLLM or compatible model server]
-    R -. current .-> S[Deterministic simulator]
-    API --> T[Telemetry contract]
-    T -. planned .-> DB[(PostgreSQL / analytics store)]
-    T -. planned .-> P[Prometheus]
-    P -. planned .-> G[Grafana]
-    T --> C[Deterministic cost and analysis code]
-    C -. planned .-> F[Forecasting baselines]
-    C -. planned .-> O[Constrained optimizer]
-    O -. planned .-> B[Controlled benchmark/evaluation]
-    B -. planned .-> L[LangGraph coordination]
-    L -. planned .-> H[Human approval]
-```
+## Telemetry contract
 
-Dashed paths are proposals from the project vision, not working integrations. The app currently has no persistent boundary, background job queue, service-to-service tracing, or infrastructure control plane.
+`InferenceTelemetry.provenance` labels timing values as `simulated`, `measured`, or `estimated`. `token_count_provenance` independently describes token counts because a real server may measure its timing but omit tokenizer usage. In that case token counts are `null`, not whitespace estimates. Summary totals sum known token counts and report how many records lacked counts.
 
-## Data flow and communication
+`TelemetrySummary.provenance` is one value when all retained records share provenance and `null` when the sample is mixed or empty. Explicit counts for simulated, measured, and estimated records remain available.
 
-1. The workload runner selects one of four fixed synthetic task prompts and sends an HTTP JSON request.
-2. FastAPI/Pydantic validates required fields, lengths, category, and limits.
-3. The simulator counts whitespace-separated prompt pieces, returns the fixed text `simulated completion` (subject to the output-token cap), and calculates synthetic latencies from constants.
-4. The API stores the telemetry object without prompt or completion text.
-5. The client requests a summary. The store totals token counts and computes nearest-rank percentiles over retained simulated latencies.
+## Cost and intelligence
 
-The store is bounded to 10,000 records and loses all records at process exit. It is not shared between worker processes.
+- `profile_telemetry` groups retained metadata by model and workload category and reports request volume, success/failure counts, token totals, latency percentiles, throughput when the retained time span is non-zero, and peak/per-minute request buckets.
+- `estimate_token_cost` applies the submitted per-model USD/1,000-token rates. Its output is always labeled estimated. No provider bill or GPU-hour cost is represented.
+- `detect_high_latency` uses a rolling prior-window median and median absolute deviation (MAD); it is a baseline, not an ML detector.
+- Forecasting functions compare a last-value forecast with a 24-hour seasonal-naive forecast on a separate generated, time-ordered synthetic dataset.
+
+## Storage and boundaries
+
+The application keeps the existing 10,000-record process-local store. It resets on restart and is not shared across workers. PostgreSQL is not added: this stage has no persistent telemetry requirement or multi-process benchmark, and the local learning path benefits from no database service. Revisit when persistence, multi-worker aggregation, or long-running experiments become necessary.
+
+There are still no agents, orchestrator, GPU telemetry source, cloud billing integration, Docker deployment, authentication, or production monitoring stack. Agent work remains reserved for the later plan milestone.
 
 ## Source map
 
 - API and routes: `src/yieldops/api/main.py`
-- Request/response/telemetry contracts: `src/yieldops/common/schemas.py`
+- Contracts: `src/yieldops/common/schemas.py`
+- Backend protocol: `src/yieldops/inference/backend.py`
 - Simulator: `src/yieldops/inference/simulator.py`
-- In-memory aggregation: `src/yieldops/telemetry/store.py`
-- Workload generation/statistics: `src/yieldops/workload/generator.py`
-- Workload CLI: `scripts/run_synthetic_workload.py`
-- Tests: `tests/unit/` and `tests/integration/`
-
-## Security/data boundary
-
-The app has no authentication or authorization. Prompts pass through the API process but are not copied into telemetry. There is no database access, external inference API, or infrastructure-changing tool in the current app. The README's approval requirement is a design requirement, not an implemented approval workflow.
+- Optional streaming adapter: `src/yieldops/inference/openai_compatible.py`
+- Telemetry store and exporter: `src/yieldops/telemetry/`
+- Workload runner and profiling: `src/yieldops/workload/`
+- Cost estimate: `src/yieldops/cost/attribution.py`
+- Anomaly baseline: `src/yieldops/evaluation/anomaly.py`
+- Forecast baselines: `src/yieldops/forecasting/baselines.py`
+- Tests: `tests/unit/`, `tests/integration/`
+- Reproducible experiments: `scripts/run_inprocess_benchmark.py`, `scripts/run_milestone_experiments.py`
